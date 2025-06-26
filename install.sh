@@ -1,20 +1,19 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script Name: Docker App Installer
-# Description: Installs and manages n8n and Nginx Proxy Manager via Docker.
+# Script Name: n8n & NPM Installer
+# Description: Installs n8n and Nginx Proxy Manager via Docker on Ubuntu.
+#              Designed to be run via: curl -sSL <url> | sudo bash
 # Author:      Your Name / AI Assistant
-# Version:     1.0
+# Version:     1.1
 # OS:          Ubuntu 22.04+
 # ==============================================================================
 
 # --- Configuration ---
-# You can change these directories if you like. /opt is a good place for them.
 BASE_DIR="/opt/docker-apps"
 N8N_DIR="$BASE_DIR/n8n"
 NPM_DIR="$BASE_DIR/npm"
-# Set your timezone for n8n. Find yours here: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-N8N_TIMEZONE="Europe/Berlin"
+N8N_TIMEZONE="Europe/Berlin" # Find yours: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 
 # --- Colors for Output ---
 GREEN='\033[0;32m'
@@ -24,13 +23,19 @@ NC='\033[0m' # No Color
 
 # --- Helper Functions ---
 
+# --- MODIFIED FOR curl | sudo bash ---
 # Function to check if the script is run as root
 check_root() {
   if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}This script must be run as root. Please use 'sudo ./setup_tools.sh'.${NC}"
+    echo -e "${RED}Error: This script requires root privileges to run.${NC}"
+    echo -e "${YELLOW}Please run it using the following command:${NC}"
+    # This dynamically shows the user the exact command they need to run.
+    # Note: We can't know the full URL here, so we give a generic example.
+    echo "curl -sSL https://raw.githubusercontent.com/YourUser/YourRepo/main/install.sh | sudo bash"
     exit 1
   fi
 }
+# --- END MODIFICATION ---
 
 # Function to pause and wait for user to press Enter
 press_enter_to_continue() {
@@ -71,11 +76,11 @@ install_docker() {
     echo -e "${GREEN}Docker Compose ${LATEST_COMPOSE} installed successfully.${NC}"
   fi
 
-  # Add current user to the docker group for non-sudo usage
+  # Add the user who invoked sudo to the docker group
   if [ -n "$SUDO_USER" ]; then
-      usermod -aG docker $SUDO_USER
+      usermod -aG docker "$SUDO_USER"
       echo -e "\n${YELLOW}Added user '$SUDO_USER' to the 'docker' group.${NC}"
-      echo -e "${YELLOW}You may need to log out and log back in for this change to take effect.${NC}"
+      echo -e "${YELLOW}You may need to log out and log back in for this to take full effect.${NC}"
   fi
   
   press_enter_to_continue
@@ -93,7 +98,6 @@ install_n8n() {
   echo -e "Creating directory: ${N8N_DIR}"
   mkdir -p "$N8N_DIR"
   
-  # Create the docker-compose.yml file for n8n
   cat <<EOF > "${N8N_DIR}/docker-compose.yml"
 version: '3.7'
 
@@ -139,7 +143,6 @@ install_npm() {
   mkdir -p "${NPM_DIR}/data"
   mkdir -p "${NPM_DIR}/letsencrypt"
 
-  # Create the docker-compose.yml file for NPM
   cat <<EOF > "${NPM_DIR}/docker-compose.yml"
 version: '3.8'
 services:
@@ -239,7 +242,7 @@ display_menu() {
 }
 
 # --- Main Loop ---
-check_root
+check_root # Check for root privileges right away.
 
 while true; do
   display_menu
