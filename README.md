@@ -5,7 +5,7 @@ Easy one-line installation of n8n (workflow automation) and Nginx Proxy Manager 
 ## ⚡ Quick Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR-USERNAME/n8n-npm-installer/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Alexander-McQuen/n8n-npm-installer/main/install.sh | bash
 ```
 
 🎯 What This Installs
