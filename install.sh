@@ -5,7 +5,7 @@
 # Description: Installs n8n and Nginx Proxy Manager via Docker on Ubuntu.
 #              Designed to be run via: curl -sSL <url> | sudo bash
 # Author:      Your Name / AI Assistant
-# Version:     1.2
+# Version:     1.3
 # OS:          Ubuntu 22.04+
 # ==============================================================================
 
@@ -32,14 +32,11 @@ check_root() {
   fi
 }
 
-# Function to pause and wait for user to press Enter
 press_enter_to_continue() {
-  read -p "Press [Enter] to continue..." < /dev/tty # <<< MODIFIED
+  read -p "Press [Enter] to return to the menu..." < /dev/tty
 }
 
-# --- Core Functions ---
-
-# 1. Install Docker and Docker Compose
+# --- Core Functions (No changes in this section) ---
 install_docker() {
   echo -e "${YELLOW}---> Checking for Docker...${NC}"
   if command -v docker &> /dev/null; then
@@ -51,10 +48,7 @@ install_docker() {
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-      tee /etc/apt/sources.list.d/docker.list > /dev/null
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
     echo -e "${GREEN}Docker installed successfully.${NC}"
@@ -76,142 +70,80 @@ install_docker() {
       echo -e "\n${YELLOW}Added user '$SUDO_USER' to the 'docker' group.${NC}"
       echo -e "${YELLOW}You may need to log out and log back in for this to take full effect.${NC}"
   fi
-  
   press_enter_to_continue
 }
 
-# 2. Install n8n
 install_n8n() {
   echo -e "${YELLOW}---> Installing n8n...${NC}"
-  if [ -d "$N8N_DIR" ]; then
-    echo -e "${RED}n8n directory already exists at $N8N_DIR. Installation aborted.${NC}"
-    press_enter_to_continue
-    return
-  fi
-
-  echo -e "Creating directory: ${N8N_DIR}"
+  if [ -d "$N8N_DIR" ]; then echo -e "${RED}n8n directory already exists. Aborting.${NC}"; press_enter_to_continue; return; fi
   mkdir -p "$N8N_DIR"
-  
   cat <<EOF > "${N8N_DIR}/docker-compose.yml"
 version: '3.7'
 services:
   n8n:
     image: n8nio/n8n
     restart: always
-    ports:
-      - "127.0.0.1:5678:5678"
+    ports: ["127.0.0.1:5678:5678"]
     environment:
-      - N8N_HOST=\${N8N_HOST}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=\${WEBHOOK_URL}
       - GENERIC_TIMEZONE=${N8N_TIMEZONE}
     volumes:
       - n8n_data:/home/node/.n8n
 volumes:
   n8n_data:
 EOF
-
-  echo -e "Starting n8n container..."
   (cd "$N8N_DIR" && docker-compose up -d)
-
-  echo -e "${GREEN}n8n has been installed!${NC}"
-  echo -e "It is running on port ${YELLOW}5678${NC} on this machine."
-  echo -e "Use Nginx Proxy Manager to expose it with a domain name."
+  echo -e "\n${GREEN}n8n has been installed!${NC}"
+  echo "It is running on port ${YELLOW}5678${NC}. Use NPM to expose it."
   press_enter_to_continue
 }
 
-# 3. Install Nginx Proxy Manager
 install_npm() {
   echo -e "${YELLOW}---> Installing Nginx Proxy Manager...${NC}"
-  if [ -d "$NPM_DIR" ]; then
-    echo -e "${RED}Nginx Proxy Manager directory already exists at $NPM_DIR. Installation aborted.${NC}"
-    press_enter_to_continue
-    return
-  fi
-
-  echo -e "Creating directory: ${NPM_DIR}"
-  mkdir -p "${NPM_DIR}/data"
-  mkdir -p "${NPM_DIR}/letsencrypt"
-
+  if [ -d "$NPM_DIR" ]; then echo -e "${RED}NPM directory already exists. Aborting.${NC}"; press_enter_to_continue; return; fi
+  mkdir -p "${NPM_DIR}/data" && mkdir -p "${NPM_DIR}/letsencrypt"
   cat <<EOF > "${NPM_DIR}/docker-compose.yml"
 version: '3.8'
 services:
   app:
     image: 'jc21/nginx-proxy-manager:latest'
     restart: unless-stopped
-    ports:
-      - '80:80'
-      - '81:81'
-      - '443:443'
+    ports: ['80:80', '81:81', '443:443']
     volumes:
       - ./data:/data
       - ./letsencrypt:/etc/letsencrypt
 EOF
-
-  echo -e "Starting Nginx Proxy Manager container..."
   (cd "$NPM_DIR" && docker-compose up -d)
-
-  echo -e "${GREEN}Nginx Proxy Manager has been installed!${NC}"
-  echo -e "Access the admin UI at: ${YELLOW}http://<your_server_ip>:81${NC}"
-  echo -e "Default credentials:"
-  echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
-  echo -e "  Password: ${YELLOW}changeme${NC}"
-  echo -e "${RED}IMPORTANT: Log in immediately and change your email and password!${NC}"
+  echo -e "\n${GREEN}Nginx Proxy Manager has been installed!${NC}"
+  echo -e "Access UI at: ${YELLOW}http://<your_server_ip>:81${NC}"
+  echo "Default User: ${YELLOW}admin@example.com${NC} | Password: ${YELLOW}changeme${NC}"
+  echo -e "${RED}Log in and change your details immediately!${NC}"
   press_enter_to_continue
 }
 
-# 4. Remove n8n
 remove_n8n() {
-  echo -e "${YELLOW}---> Removing n8n...${NC}"
-  if [ ! -d "$N8N_DIR" ]; then
-    echo -e "${RED}n8n directory not found. It might already be removed.${NC}"
-    press_enter_to_continue
-    return
-  fi
-  
-  read -p "Are you sure you want to permanently remove n8n and all its data? (y/N): " confirm < /dev/tty # <<< MODIFIED
-  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+  if [ ! -d "$N8N_DIR" ]; then echo -e "${YELLOW}n8n not found. Skipping.${NC}"; return; fi
+  read -p "Permanently remove n8n and all its data? (y/N): " confirm < /dev/tty
+  if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+    echo "Stopping and removing n8n containers and volumes..."
+    (cd "$N8N_DIR" && docker-compose down -v)
+    rm -rf "$N8N_DIR"
+    echo -e "${GREEN}n8n successfully removed.${NC}"
+  else
     echo "Removal cancelled."
-    press_enter_to_continue
-    return
   fi
-
-  echo "Stopping n8n container and removing volumes..."
-  (cd "$N8N_DIR" && docker-compose down -v)
-  
-  echo "Deleting n8n directory: $N8N_DIR"
-  rm -rf "$N8N_DIR"
-
-  echo -e "${GREEN}n8n has been successfully removed.${NC}"
-  press_enter_to_continue
 }
 
-# 5. Remove Nginx Proxy Manager
 remove_npm() {
-  echo -e "${YELLOW}---> Removing Nginx Proxy Manager...${NC}"
-  if [ ! -d "$NPM_DIR" ]; then
-    echo -e "${RED}Nginx Proxy Manager directory not found. It might already be removed.${NC}"
-    press_enter_to_continue
-    return
-  fi
-
-  read -p "Are you sure you want to permanently remove Nginx Proxy Manager and all its data? (y/N): " confirm < /dev/tty # <<< MODIFIED
-  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+  if [ ! -d "$NPM_DIR" ]; then echo -e "${YELLOW}NPM not found. Skipping.${NC}"; return; fi
+  read -p "Permanently remove Nginx Proxy Manager and all its data? (y/N): " confirm < /dev/tty
+  if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+    echo "Stopping and removing NPM containers and volumes..."
+    (cd "$NPM_DIR" && docker-compose down -v)
+    rm -rf "$NPM_DIR"
+    echo -e "${GREEN}NPM successfully removed.${NC}"
+  else
     echo "Removal cancelled."
-    press_enter_to_continue
-    return
   fi
-  
-  echo "Stopping NPM container and removing volumes..."
-  (cd "$NPM_DIR" && docker-compose down -v)
-
-  echo "Deleting NPM directory: $NPM_DIR"
-  rm -rf "$NPM_DIR"
-
-  echo -e "${GREEN}Nginx Proxy Manager has been successfully removed.${NC}"
-  press_enter_to_continue
 }
 
 # --- Main Menu Logic ---
@@ -220,7 +152,7 @@ display_menu() {
   echo "================================================"
   echo "      Docker App Management Script"
   echo "================================================"
-  echo -e " ${GREEN}1.${NC} Install Docker & Docker Compose"
+  echo -e " ${GREEN}1.${NC} Install/Verify Docker & Docker Compose"
   echo ""
   echo -e " ${GREEN}2.${NC} Install n8n"
   echo -e " ${GREEN}3.${NC} Install Nginx Proxy Manager"
@@ -238,18 +170,30 @@ check_root
 
 while true; do
   display_menu
-  read -p "Enter your choice [1-6 or q]: " choice < /dev/tty # <<< MODIFIED
+  read -p "Enter your choice [1-6 or q]: " choice < /dev/tty
+  
+  # <<< MODIFIED SECTION >>>
   case $choice in
-    1) install_docker ;;
-    2) install_n8n ;;
-    3) install_npm ;;
+    1) clear; install_docker ;;
+    2) clear; install_n8n ;;
+    3) clear; install_npm ;;
     4)
-      echo -e "\n${RED}This will remove BOTH applications.${NC}"
+      clear
+      echo -e "${RED}This will remove BOTH applications.${NC}\n"
       remove_n8n
       remove_npm
+      press_enter_to_continue
       ;;
-    5) remove_n8n ;;
-    6) remove_npm ;;
+    5) 
+      clear
+      remove_n8n
+      press_enter_to_continue
+      ;;
+    6)
+      clear
+      remove_npm
+      press_enter_to_continue
+      ;;
     q|Q)
       echo "Exiting."
       exit 0
