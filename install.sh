@@ -89,7 +89,7 @@ check_status "Failed to add user to the docker group."
 print_success "Docker and Docker Compose installed successfully."
 print_info "IMPORTANT: You need to log out and log back in for the group changes to take effect."
 
-# 3. Set Up Directories and Docker Network
+# 3. Set Up Directories
 # ------------------------------------------------------------------------------
 print_info "Creating installation directory at $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR/n8n-data"
@@ -97,10 +97,6 @@ mkdir -p "$INSTALL_DIR/npm-data"
 mkdir -p "$INSTALL_DIR/npm-letsencrypt"
 cd "$INSTALL_DIR"
 check_status "Failed to create or navigate to the installation directory."
-
-print_info "Creating Docker network '$DOCKER_NETWORK_NAME'..."
-docker network create $DOCKER_NETWORK_NAME >/dev/null 2>&1 || print_info "Docker network already exists."
-check_status "Failed to create Docker network."
 
 # 4. Create Docker Compose Configuration
 # ------------------------------------------------------------------------------
@@ -149,7 +145,8 @@ services:
 
 networks:
   ${DOCKER_NETWORK_NAME}:
-    external: true
+    name: ${DOCKER_NETWORK_NAME}
+    driver: bridge
 EOF
 
 check_status "Failed to create docker-compose.yml file."
