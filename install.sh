@@ -3,7 +3,7 @@
 # Docker n8n & Nginx Proxy Manager Installer
 # Compatible with Ubuntu 22.04+
 # Author: Auto-Installer Script
-# Version: 1.0
+# Version: 1.1
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,6 +34,30 @@ print_header() {
     echo -e "${BLUE}================================${NC}"
     echo -e "${BLUE}$1${NC}"
     echo -e "${BLUE}================================${NC}"
+}
+
+# Function to get user input safely
+get_input() {
+    local prompt="$1"
+    local input=""
+    echo -n "$prompt"
+    read input
+    echo "$input"
+}
+
+# Function to get yes/no input
+get_yes_no() {
+    local prompt="$1"
+    local input=""
+    while true; do
+        echo -n "$prompt (y/N): "
+        read input
+        case "${input,,}" in
+            y|yes) return 0 ;;
+            n|no|"") return 1 ;;
+            *) echo "Please enter y or n" ;;
+        esac
+    done
 }
 
 # Function to check if running as root
@@ -235,10 +259,7 @@ remove_both() {
     print_header "Removing n8n and Nginx Proxy Manager"
     
     print_warning "This will remove both n8n and Nginx Proxy Manager containers and their data!"
-    read -p "Are you sure? (y/N): " -r confirm
-    confirm=$(echo "$confirm" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-    
-    if [[ "$confirm" != "y" ]]; then
+    if ! get_yes_no "Are you sure?"; then
         print_status "Operation cancelled."
         return 0
     fi
@@ -259,10 +280,7 @@ remove_n8n() {
         docker compose down -v
         
         print_warning "Do you want to remove n8n data directory? ($N8N_DATA_DIR)"
-        read -p "Remove data? (y/N): " -r confirm
-        confirm=$(echo "$confirm" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-        
-        if [[ "$confirm" == "y" ]]; then
+        if get_yes_no "Remove data?"; then
             rm -rf "$N8N_DATA_DIR"
             print_status "n8n data directory removed."
         fi
@@ -284,10 +302,7 @@ remove_npm() {
         docker compose down -v
         
         print_warning "Do you want to remove NPM data directory? ($NPM_DATA_DIR)"
-        read -p "Remove data? (y/N): " -r confirm
-        confirm=$(echo "$confirm" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-        
-        if [[ "$confirm" == "y" ]]; then
+        if get_yes_no "Remove data?"; then
             rm -rf "$NPM_DATA_DIR"
             print_status "NPM data directory removed."
         fi
@@ -349,15 +364,10 @@ show_logs() {
     echo "2. Nginx Proxy Manager logs"
     echo "3. Back to main menu"
     echo
-    read -p "Select option (1-3): " choice
-    choice=$(echo "$choice" | tr -d '[:space:]')
     
-    if [[ -z "$choice" ]]; then
-        print_warning "No option selected"
-        return 0
-    fi
+    choice=$(get_input "Select option (1-3): ")
     
-    case $choice in
+    case "$choice" in
         1)
             if [[ -d "$COMPOSE_DIR/n8n" ]]; then
                 cd "$COMPOSE_DIR/n8n"
@@ -374,13 +384,20 @@ show_logs() {
                 print_warning "Nginx Proxy Manager not installed"
             fi
             ;;
-        3)
+        3|"")
             return 0
             ;;
         *)
-            print_error "Invalid option"
+            print_error "Invalid option '$choice'"
             ;;
     esac
+}
+
+# Function to pause for user input
+pause() {
+    echo
+    echo -n "Press Enter to continue..."
+    read
 }
 
 # Main menu function
@@ -409,23 +426,13 @@ main() {
     
     while true; do
         show_menu
-        read -p "Select an option (1-9): " choice
-        
-        # Trim whitespace and handle empty input
-        choice=$(echo "$choice" | tr -d '[:space:]')
-        
-        if [[ -z "$choice" ]]; then
-            print_error "No option selected. Please enter a number between 1-9."
-            read -p "Press Enter to continue..."
-            continue
-        fi
-        
+        choice=$(get_input "Select an option (1-9): ")
         echo
         
-        case $choice in
+        case "$choice" in
             1)
                 install_docker
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             2)
                 if ! command -v docker &> /dev/null; then
@@ -433,7 +440,7 @@ main() {
                 else
                     install_n8n
                 fi
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             3)
                 if ! command -v docker &> /dev/null; then
@@ -441,34 +448,34 @@ main() {
                 else
                     install_npm
                 fi
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             4)
                 remove_both
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             5)
                 remove_n8n
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             6)
                 remove_npm
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             7)
                 check_status
-                read -p "Press Enter to continue..."
+                pause
                 ;;
             8)
                 show_logs
                 ;;
-            9)
+            9|"")
                 print_status "Goodbye!"
                 exit 0
                 ;;
             *)
-                print_error "Invalid option '$choice'. Please select a number between 1-9."
-                read -p "Press Enter to continue..."
+                print_error "Invalid option '$choice'. Please enter a number between 1-9."
+                pause
                 ;;
         esac
     done
