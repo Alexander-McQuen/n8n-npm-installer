@@ -235,9 +235,10 @@ remove_both() {
     print_header "Removing n8n and Nginx Proxy Manager"
     
     print_warning "This will remove both n8n and Nginx Proxy Manager containers and their data!"
-    read -p "Are you sure? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    read -p "Are you sure? (y/N): " -r confirm
+    confirm=$(echo "$confirm" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    
+    if [[ "$confirm" != "y" ]]; then
         print_status "Operation cancelled."
         return 0
     fi
@@ -258,9 +259,10 @@ remove_n8n() {
         docker compose down -v
         
         print_warning "Do you want to remove n8n data directory? ($N8N_DATA_DIR)"
-        read -p "Remove data? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        read -p "Remove data? (y/N): " -r confirm
+        confirm=$(echo "$confirm" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        
+        if [[ "$confirm" == "y" ]]; then
             rm -rf "$N8N_DATA_DIR"
             print_status "n8n data directory removed."
         fi
@@ -282,9 +284,10 @@ remove_npm() {
         docker compose down -v
         
         print_warning "Do you want to remove NPM data directory? ($NPM_DATA_DIR)"
-        read -p "Remove data? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        read -p "Remove data? (y/N): " -r confirm
+        confirm=$(echo "$confirm" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        
+        if [[ "$confirm" == "y" ]]; then
             rm -rf "$NPM_DATA_DIR"
             print_status "NPM data directory removed."
         fi
@@ -347,6 +350,12 @@ show_logs() {
     echo "3. Back to main menu"
     echo
     read -p "Select option (1-3): " choice
+    choice=$(echo "$choice" | tr -d '[:space:]')
+    
+    if [[ -z "$choice" ]]; then
+        print_warning "No option selected"
+        return 0
+    fi
     
     case $choice in
         1)
@@ -401,6 +410,16 @@ main() {
     while true; do
         show_menu
         read -p "Select an option (1-9): " choice
+        
+        # Trim whitespace and handle empty input
+        choice=$(echo "$choice" | tr -d '[:space:]')
+        
+        if [[ -z "$choice" ]]; then
+            print_error "No option selected. Please enter a number between 1-9."
+            read -p "Press Enter to continue..."
+            continue
+        fi
+        
         echo
         
         case $choice in
@@ -448,7 +467,7 @@ main() {
                 exit 0
                 ;;
             *)
-                print_error "Invalid option. Please select 1-9."
+                print_error "Invalid option '$choice'. Please select a number between 1-9."
                 read -p "Press Enter to continue..."
                 ;;
         esac
