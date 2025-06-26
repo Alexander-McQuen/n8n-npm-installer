@@ -5,7 +5,7 @@
 # Description: Installs n8n and Nginx Proxy Manager via Docker on Ubuntu.
 #              Designed to be run via: curl -sSL <url> | sudo bash
 # Author:      Your Name / AI Assistant
-# Version:     1.1
+# Version:     1.2
 # OS:          Ubuntu 22.04+
 # ==============================================================================
 
@@ -23,23 +23,18 @@ NC='\033[0m' # No Color
 
 # --- Helper Functions ---
 
-# --- MODIFIED FOR curl | sudo bash ---
-# Function to check if the script is run as root
 check_root() {
   if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}Error: This script requires root privileges to run.${NC}"
     echo -e "${YELLOW}Please run it using the following command:${NC}"
-    # This dynamically shows the user the exact command they need to run.
-    # Note: We can't know the full URL here, so we give a generic example.
-    echo "curl -sSL https://raw.githubusercontent.com/YourUser/YourRepo/main/install.sh | sudo bash"
+    echo "curl -sSL https://raw.githubusercontent.com/Alexander-McQuen/n8n-npm-installer/main/install.sh | sudo bash"
     exit 1
   fi
 }
-# --- END MODIFICATION ---
 
 # Function to pause and wait for user to press Enter
 press_enter_to_continue() {
-  read -p "Press [Enter] to continue..."
+  read -p "Press [Enter] to continue..." < /dev/tty # <<< MODIFIED
 }
 
 # --- Core Functions ---
@@ -76,7 +71,6 @@ install_docker() {
     echo -e "${GREEN}Docker Compose ${LATEST_COMPOSE} installed successfully.${NC}"
   fi
 
-  # Add the user who invoked sudo to the docker group
   if [ -n "$SUDO_USER" ]; then
       usermod -aG docker "$SUDO_USER"
       echo -e "\n${YELLOW}Added user '$SUDO_USER' to the 'docker' group.${NC}"
@@ -100,7 +94,6 @@ install_n8n() {
   
   cat <<EOF > "${N8N_DIR}/docker-compose.yml"
 version: '3.7'
-
 services:
   n8n:
     image: n8nio/n8n
@@ -116,7 +109,6 @@ services:
       - GENERIC_TIMEZONE=${N8N_TIMEZONE}
     volumes:
       - n8n_data:/home/node/.n8n
-
 volumes:
   n8n_data:
 EOF
@@ -126,7 +118,7 @@ EOF
 
   echo -e "${GREEN}n8n has been installed!${NC}"
   echo -e "It is running on port ${YELLOW}5678${NC} on this machine."
-  echo -e "You should now use Nginx Proxy Manager to expose it with a domain name."
+  echo -e "Use Nginx Proxy Manager to expose it with a domain name."
   press_enter_to_continue
 }
 
@@ -179,7 +171,7 @@ remove_n8n() {
     return
   fi
   
-  read -p "Are you sure you want to permanently remove n8n and all its data? (y/N): " confirm
+  read -p "Are you sure you want to permanently remove n8n and all its data? (y/N): " confirm < /dev/tty # <<< MODIFIED
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "Removal cancelled."
     press_enter_to_continue
@@ -205,7 +197,7 @@ remove_npm() {
     return
   fi
 
-  read -p "Are you sure you want to permanently remove Nginx Proxy Manager and all its data? (y/N): " confirm
+  read -p "Are you sure you want to permanently remove Nginx Proxy Manager and all its data? (y/N): " confirm < /dev/tty # <<< MODIFIED
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "Removal cancelled."
     press_enter_to_continue
@@ -242,11 +234,11 @@ display_menu() {
 }
 
 # --- Main Loop ---
-check_root # Check for root privileges right away.
+check_root
 
 while true; do
   display_menu
-  read -p "Enter your choice [1-6 or q]: " choice
+  read -p "Enter your choice [1-6 or q]: " choice < /dev/tty # <<< MODIFIED
   case $choice in
     1) install_docker ;;
     2) install_n8n ;;
