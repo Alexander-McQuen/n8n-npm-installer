@@ -1,197 +1,267 @@
 #!/bin/bash
 
 # ==============================================================================
-#
-#          n8n and Nginx Proxy Manager Installer for Ubuntu 22.04+
-#
-# This script automates the installation of:
-#   1. Docker Engine and Docker Compose Plugin
-#   2. n8n (a workflow automation tool)
-#   3. Nginx Proxy Manager (for easy reverse proxying and SSL management)
-#
-# The entire setup is containerized using Docker.
-#
+# Script Name: Docker App Installer
+# Description: Installs and manages n8n and Nginx Proxy Manager via Docker.
+# Author:      Your Name / AI Assistant
+# Version:     1.0
+# OS:          Ubuntu 22.04+
 # ==============================================================================
 
 # --- Configuration ---
-# You can change these variables if you want.
-INSTALL_DIR="$HOME/n8n_stack"
-DOCKER_NETWORK_NAME="n8n-proxy-network"
-N8N_SUBDOMAIN="n8n.your-domain.com" # IMPORTANT: Replace with your actual domain/subdomain
+# You can change these directories if you like. /opt is a good place for them.
+BASE_DIR="/opt/docker-apps"
+N8N_DIR="$BASE_DIR/n8n"
+NPM_DIR="$BASE_DIR/npm"
+# Set your timezone for n8n. Find yours here: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+N8N_TIMEZONE="Europe/Berlin"
+
+# --- Colors for Output ---
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
 # --- Helper Functions ---
-# Function to print messages in a pretty format
-print_info() {
-    echo -e "\n\e[1;34m[INFO]\e[0m $1"
-}
 
-# Function to print success messages
-print_success() {
-    echo -e "\e[1;32m[SUCCESS]\e[0m $1"
-}
-
-# Function to print error messages and exit
-print_error() {
-    echo -e "\e[1;31m[ERROR]\e[0m $1"
+# Function to check if the script is run as root
+check_root() {
+  if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}This script must be run as root. Please use 'sudo ./setup_tools.sh'.${NC}"
     exit 1
+  fi
 }
 
-# Function to check the exit status of the last command
-check_status() {
-    if [ $? -ne 0 ]; then
-        print_error "$1"
-    fi
+# Function to pause and wait for user to press Enter
+press_enter_to_continue() {
+  read -p "Press [Enter] to continue..."
 }
 
-# --- Main Script ---
+# --- Core Functions ---
 
-# 1. Update System & Install Dependencies
-# ------------------------------------------------------------------------------
-print_info "Updating package lists and installing required dependencies..."
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg lsb-release
-check_status "Failed to install dependencies."
-
-# 2. Install Docker Engine and Docker Compose
-# ------------------------------------------------------------------------------
-print_info "Installing Docker Engine and Docker Compose..."
-
-# Add Docker's official GPG key
-if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
-    sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    sudo chmod a+r /etc/apt/keyrings/docker.gpg
-    check_status "Failed to add Docker GPG key."
-else
-    print_info "Docker GPG key already exists."
-fi
-
-
-# Set up the Docker repository
-if ! grep -q "download.docker.com" /etc/apt/sources.list.d/docker.list 2>/dev/null; then
+# 1. Install Docker and Docker Compose
+install_docker() {
+  echo -e "${YELLOW}---> Checking for Docker...${NC}"
+  if command -v docker &> /dev/null; then
+    echo -e "${GREEN}Docker is already installed. Skipping.${NC}"
+  else
+    echo -e "${YELLOW}---> Installing Docker...${NC}"
+    apt-get update
+    apt-get install -y ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
     echo \
       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-      $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    check_status "Failed to set up Docker repository."
-else
-    print_info "Docker repository already exists in sources.list."
-fi
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
+    echo -e "${GREEN}Docker installed successfully.${NC}"
+  fi
 
-# Install Docker Engine, CLI, Containerd, and Compose plugin
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-check_status "Failed to install Docker packages."
+  echo -e "\n${YELLOW}---> Checking for Docker Compose...${NC}"
+  if command -v docker-compose &> /dev/null; then
+    echo -e "${GREEN}Docker Compose is already installed. Skipping.${NC}"
+  else
+    echo -e "${YELLOW}---> Installing Docker Compose...${NC}"
+    LATEST_COMPOSE=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d\" -f4)
+    curl -L "https://github.com/docker/compose/releases/download/${LATEST_COMPOSE}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    echo -e "${GREEN}Docker Compose ${LATEST_COMPOSE} installed successfully.${NC}"
+  fi
 
-# Add current user to the docker group to run docker commands without sudo
-sudo usermod -aG docker $USER
-check_status "Failed to add user to the docker group."
+  # Add current user to the docker group for non-sudo usage
+  if [ -n "$SUDO_USER" ]; then
+      usermod -aG docker $SUDO_USER
+      echo -e "\n${YELLOW}Added user '$SUDO_USER' to the 'docker' group.${NC}"
+      echo -e "${YELLOW}You may need to log out and log back in for this change to take effect.${NC}"
+  fi
+  
+  press_enter_to_continue
+}
 
-print_success "Docker and Docker Compose installed successfully."
-print_info "IMPORTANT: You need to log out and log back in for the group changes to take effect."
+# 2. Install n8n
+install_n8n() {
+  echo -e "${YELLOW}---> Installing n8n...${NC}"
+  if [ -d "$N8N_DIR" ]; then
+    echo -e "${RED}n8n directory already exists at $N8N_DIR. Installation aborted.${NC}"
+    press_enter_to_continue
+    return
+  fi
 
-# 3. Set Up Directories
-# ------------------------------------------------------------------------------
-print_info "Creating installation directory at $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR/n8n-data"
-mkdir -p "$INSTALL_DIR/npm-data"
-mkdir -p "$INSTALL_DIR/npm-letsencrypt"
-cd "$INSTALL_DIR"
-check_status "Failed to create or navigate to the installation directory."
-
-# 4. Create Docker Compose Configuration
-# ------------------------------------------------------------------------------
-print_info "Creating docker-compose.yml file..."
-
-# WARNING: Do not change the VUE_APP_URL_BASE_API and WEBHOOK_URL.
-# They use the Docker service name 'n8n' to communicate over the internal Docker network.
-# The N8N_HOST should be the subdomain you will use to access n8n publicly.
-
-cat > docker-compose.yml << EOF
-version: '3.8'
+  echo -e "Creating directory: ${N8N_DIR}"
+  mkdir -p "$N8N_DIR"
+  
+  # Create the docker-compose.yml file for n8n
+  cat <<EOF > "${N8N_DIR}/docker-compose.yml"
+version: '3.7'
 
 services:
   n8n:
     image: n8nio/n8n
-    container_name: n8n
-    restart: unless-stopped
+    restart: always
     ports:
-      - '127.0.0.1:5678:5678'
+      - "127.0.0.1:5678:5678"
     environment:
-      - N8N_HOST=${N8N_SUBDOMAIN}
+      - N8N_HOST=\${N8N_HOST}
       - N8N_PORT=5678
-      - N8N_PROTOCOL=https
+      - N8N_PROTOCOL=http
       - NODE_ENV=production
-      - VUE_APP_URL_BASE_API=http://localhost:5678/
-      - WEBHOOK_URL=https://${N8N_SUBDOMAIN}/
-      - GENERIC_TIMEZONE=America/New_York # Change to your timezone, e.g., Europe/Berlin
+      - WEBHOOK_URL=\${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${N8N_TIMEZONE}
     volumes:
-      - ./n8n-data:/home/node/.n8n
-    networks:
-      - ${DOCKER_NETWORK_NAME}
+      - n8n_data:/home/node/.n8n
 
-  nginx-proxy-manager:
-    image: 'jc21/nginx-proxy-manager:latest'
-    container_name: nginx-proxy-manager
-    restart: unless-stopped
-    ports:
-      - '80:80'   # Public HTTP Port
-      - '443:443' # Public HTTPS Port
-      - '81:81'   # Admin Web UI Port
-    volumes:
-      - ./npm-data:/data
-      - ./npm-letsencrypt:/etc/letsencrypt
-    networks:
-      - ${DOCKER_NETWORK_NAME}
-
-networks:
-  ${DOCKER_NETWORK_NAME}:
-    name: ${DOCKER_NETWORK_NAME}
-    driver: bridge
+volumes:
+  n8n_data:
 EOF
 
-check_status "Failed to create docker-compose.yml file."
-print_success "docker-compose.yml created successfully."
+  echo -e "Starting n8n container..."
+  (cd "$N8N_DIR" && docker-compose up -d)
 
-# 5. Final Instructions and Starting Services
-# ------------------------------------------------------------------------------
-echo ""
-echo -e "\e[1;32m========================= INSTALLATION COMPLETE =========================\e[0m"
-echo ""
-echo "The script has finished. Here are your next steps:"
-echo ""
-echo -e "\e[1;33mAction Required:\e[0m Please log out and log back in now."
-echo "This is necessary to apply the Docker group permissions."
-echo ""
-echo "After you log back in, navigate to the installation directory:"
-echo -e "\e[1;35mcd ${INSTALL_DIR}\e[0m"
-echo ""
-echo "And start the services with:"
-echo -e "\e[1;35mdocker compose up -d\e[0m"
-echo ""
-echo "Once the containers are running:"
-echo ""
-echo -e "1. \e[1;36mConfigure Nginx Proxy Manager:\e[0m"
-echo "   - Open your browser and go to: \e[4mhttp://<your-server-ip>:81\e[0m"
-echo "   - Default Admin User:"
-echo "     - Email:    \e[1;32madmin@example.com\e[0m"
-echo "     - Password: \e[1;32mchangeme\e[0m"
-echo "   - You will be forced to change these credentials on your first login."
-echo ""
-echo -e "2. \e[1;36mSet Up Your Domain:\e[0m"
-echo "   - Point an A record for \e[1;33m${N8N_SUBDOMAIN}\e[0m to your server's public IP address."
-echo ""
-echo -e "3. \e[1;36mCreate the Proxy Host:\e[0m"
-echo "   - In Nginx Proxy Manager, go to 'Hosts' -> 'Proxy Hosts'."
-echo "   - Add a new proxy host:"
-echo "     - Domain Name: \e[1;33m${N8N_SUBDOMAIN}\e[0m"
-echo "     - Scheme: \e[1;32mhttp\e[0m"
-echo "     - Forward Hostname / IP: \e[1;32mn8n\e[0m (this is the container name)"
-echo "     - Forward Port: \e[1;32m5678\e[0m"
-echo "     - Enable 'Block Common Exploits'."
-echo "   - Go to the 'SSL' tab, request a new SSL certificate, and enable 'Force SSL'."
-echo ""
-echo -e "4. \e[1;36mAccess n8n:\e[0m"
-echo "   - You should now be able to securely access your n8n instance at:"
-echo "     \e[4mhttps://${N8N_SUBDOMAIN}\e[0m"
-echo ""
-echo -e "\e[1;32m=========================================================================\e[0m"
+  echo -e "${GREEN}n8n has been installed!${NC}"
+  echo -e "It is running on port ${YELLOW}5678${NC} on this machine."
+  echo -e "You should now use Nginx Proxy Manager to expose it with a domain name."
+  press_enter_to_continue
+}
+
+# 3. Install Nginx Proxy Manager
+install_npm() {
+  echo -e "${YELLOW}---> Installing Nginx Proxy Manager...${NC}"
+  if [ -d "$NPM_DIR" ]; then
+    echo -e "${RED}Nginx Proxy Manager directory already exists at $NPM_DIR. Installation aborted.${NC}"
+    press_enter_to_continue
+    return
+  fi
+
+  echo -e "Creating directory: ${NPM_DIR}"
+  mkdir -p "${NPM_DIR}/data"
+  mkdir -p "${NPM_DIR}/letsencrypt"
+
+  # Create the docker-compose.yml file for NPM
+  cat <<EOF > "${NPM_DIR}/docker-compose.yml"
+version: '3.8'
+services:
+  app:
+    image: 'jc21/nginx-proxy-manager:latest'
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+EOF
+
+  echo -e "Starting Nginx Proxy Manager container..."
+  (cd "$NPM_DIR" && docker-compose up -d)
+
+  echo -e "${GREEN}Nginx Proxy Manager has been installed!${NC}"
+  echo -e "Access the admin UI at: ${YELLOW}http://<your_server_ip>:81${NC}"
+  echo -e "Default credentials:"
+  echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
+  echo -e "  Password: ${YELLOW}changeme${NC}"
+  echo -e "${RED}IMPORTANT: Log in immediately and change your email and password!${NC}"
+  press_enter_to_continue
+}
+
+# 4. Remove n8n
+remove_n8n() {
+  echo -e "${YELLOW}---> Removing n8n...${NC}"
+  if [ ! -d "$N8N_DIR" ]; then
+    echo -e "${RED}n8n directory not found. It might already be removed.${NC}"
+    press_enter_to_continue
+    return
+  fi
+  
+  read -p "Are you sure you want to permanently remove n8n and all its data? (y/N): " confirm
+  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "Removal cancelled."
+    press_enter_to_continue
+    return
+  fi
+
+  echo "Stopping n8n container and removing volumes..."
+  (cd "$N8N_DIR" && docker-compose down -v)
+  
+  echo "Deleting n8n directory: $N8N_DIR"
+  rm -rf "$N8N_DIR"
+
+  echo -e "${GREEN}n8n has been successfully removed.${NC}"
+  press_enter_to_continue
+}
+
+# 5. Remove Nginx Proxy Manager
+remove_npm() {
+  echo -e "${YELLOW}---> Removing Nginx Proxy Manager...${NC}"
+  if [ ! -d "$NPM_DIR" ]; then
+    echo -e "${RED}Nginx Proxy Manager directory not found. It might already be removed.${NC}"
+    press_enter_to_continue
+    return
+  fi
+
+  read -p "Are you sure you want to permanently remove Nginx Proxy Manager and all its data? (y/N): " confirm
+  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "Removal cancelled."
+    press_enter_to_continue
+    return
+  fi
+  
+  echo "Stopping NPM container and removing volumes..."
+  (cd "$NPM_DIR" && docker-compose down -v)
+
+  echo "Deleting NPM directory: $NPM_DIR"
+  rm -rf "$NPM_DIR"
+
+  echo -e "${GREEN}Nginx Proxy Manager has been successfully removed.${NC}"
+  press_enter_to_continue
+}
+
+# --- Main Menu Logic ---
+display_menu() {
+  clear
+  echo "================================================"
+  echo "      Docker App Management Script"
+  echo "================================================"
+  echo -e " ${GREEN}1.${NC} Install Docker & Docker Compose"
+  echo ""
+  echo -e " ${GREEN}2.${NC} Install n8n"
+  echo -e " ${GREEN}3.${NC} Install Nginx Proxy Manager"
+  echo ""
+  echo -e " ${RED}4.${NC} REMOVE n8n AND Nginx Proxy Manager"
+  echo -e " ${RED}5.${NC} REMOVE n8n only"
+  echo -e " ${RED}6.${NC} REMOVE Nginx Proxy Manager only"
+  echo ""
+  echo -e " ${YELLOW}q.${NC} Quit"
+  echo "================================================"
+}
+
+# --- Main Loop ---
+check_root
+
+while true; do
+  display_menu
+  read -p "Enter your choice [1-6 or q]: " choice
+  case $choice in
+    1) install_docker ;;
+    2) install_n8n ;;
+    3) install_npm ;;
+    4)
+      echo -e "\n${RED}This will remove BOTH applications.${NC}"
+      remove_n8n
+      remove_npm
+      ;;
+    5) remove_n8n ;;
+    6) remove_npm ;;
+    q|Q)
+      echo "Exiting."
+      exit 0
+      ;;
+    *)
+      echo -e "${RED}Invalid option. Please try again.${NC}"
+      sleep 2
+      ;;
+  esac
+done
