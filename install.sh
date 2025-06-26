@@ -38,54 +38,245 @@ fi
 
 log "Starting n8n and Nginx Proxy Manager installation..."
 
-# Update system packages
-log "Updating system packages..."
-sudo apt update && sudo apt upgrade -y
+# Update system packages with retry logic
+update_system() {
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        log "Updating system packages (attempt $attempt of $max_attempts)..."
+        if sudo apt update; then
+            log "Package lists updated successfully!"
+            break
+        else
+            warning "Package update failed on attempt $attempt"
+            if [ $attempt -lt $max_attempts ]; then
+                log "Switching to main Ubuntu repositories..."
+                # Backup original sources.list
+                sudo cp /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%s) 2>/dev/null || true
+                # Try switching to main repositories if using regional mirrors
+                sudo sed -i.bak 's/[a-z][a-z]\.archive\.ubuntu\.com/archive.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
+                sudo sed -i.bak 's/[a-z][a-z]-[a-z][a-z]-[0-9]\.clouds\.archive\.ubuntu\.com/archive.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
+                sudo apt clean
+                sleep 5
+            fi
+        fi
+        ((attempt++))
+    done
+    
+    if [ $attempt -gt $max_attempts ]; then
+        warning "System update failed after $max_attempts attempts. Continuing with existing packages..."
+    fi
+    
+    # Try upgrade but don't fail if it doesn't work
+    log "Attempting system upgrade..."
+    sudo apt upgrade -y || warning "System upgrade failed, but continuing installation..."
+}
 
-# Install required packages
-log "Installing required packages..."
-sudo apt install -y \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release \
-    software-properties-common \
-    unzip \
-    wget
+# Install required packages with comprehensive retry logic
+install_packages() {
+    log "Installing required packages..."
+    
+    # Essential packages that we absolutely need
+    local essential_packages="curl wget"
+    # Nice-to-have packages
+    local optional_packages="apt-transport-https ca-certificates gnupg lsb-release software-properties-common unzip"
+    
+    # Install essential packages first
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        log "Installing essential packages (attempt $attempt of $max_attempts)..."
+        if sudo apt install -y $essential_packages; then
+            log "Essential packages installed successfully!"
+            break
+        else
+            warning "Essential package installation failed on attempt $attempt"
+            if [ $attempt -lt $max_attempts ]; then
+                log "Trying to fix package issues..."
+                sudo apt update --fix-missing || true
+                sudo apt-get clean
+                sudo apt-get autoclean
+                sudo dpkg --configure -a || true
+                sleep 5
+            fi
+        fi
+        ((attempt++))
+    done
+    
+    if [ $attempt -gt $max_attempts ]; then
+        error "Failed to install essential packages (curl, wget). Cannot continue."
+    fi
+    
+    # Try to install optional packages (don't fail if they don't install)
+    log "Installing optional packages..."
+    for package in $optional_packages; do
+        if ! dpkg -l | grep -q "^ii  $package "; then
+            log "Installing $package..."
+            if ! sudo apt install -y "$package" 2>/dev/null; then
+                warning "Failed to install $package, but continuing..."
+            fi
+        else
+            log "$package is already installed"
+        fi
+    done
+    
+    log "Package installation phase completed!"
+}
+
+update_system
+install_packages
 
 # Check if Docker is already installed
-if command -v docker >/dev/null 2>&1; then
-    log "Docker is already installed. Skipping Docker installation."
-else
+check_and_install_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        log "Docker is already installed. Checking version..."
+        docker --version
+        log "Skipping Docker installation."
+        return 0
+    fi
+
     log "Installing Docker..."
     
+    # Try multiple installation methods
+    local docker_installed=false
+    
+    # Method 1: Official Docker repository (preferred)
+    if ! $docker_installed; then
+        log "Attempting Docker installation via official repository..."
+        if install_docker_official; then
+            docker_installed=true
+        else
+            warning "Official Docker installation failed, trying alternative method..."
+        fi
+    fi
+    
+    # Method 2: Ubuntu repository (fallback)
+    if ! $docker_installed; then
+        log "Attempting Docker installation via Ubuntu repository..."
+        if install_docker_ubuntu; then
+            docker_installed=true
+        else
+            warning "Ubuntu Docker installation failed, trying snap..."
+        fi
+    fi
+    
+    # Method 3: Snap (last resort)
+    if ! $docker_installed; then
+        log "Attempting Docker installation via snap..."
+        if install_docker_snap; then
+            docker_installed=true
+        else
+            error "All Docker installation methods failed!"
+        fi
+    fi
+    
+    if $docker_installed; then
+        # Add current user to docker group
+        sudo usermod -aG docker $USER || warning "Failed to add user to docker group"
+        
+        # Enable and start Docker service
+        sudo systemctl enable docker || warning "Failed to enable docker service"
+        sudo systemctl start docker || warning "Failed to start docker service"
+        
+        log "Docker installed successfully!"
+        docker --version
+    fi
+}
+
+# Official Docker installation method
+install_docker_official() {
     # Add Docker's official GPG key
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    if ! curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg 2>/dev/null; then
+        return 1
+    fi
     
     # Add Docker repository
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    if ! echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null; then
+        return 1
+    fi
     
     # Update package index
-    sudo apt update
+    if ! sudo apt update; then
+        return 1
+    fi
     
     # Install Docker Engine
-    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    
-    # Add current user to docker group
-    sudo usermod -aG docker $USER
-    
-    # Enable and start Docker service
-    sudo systemctl enable docker
-    sudo systemctl start docker
-    
-    log "Docker installed successfully!"
-fi
+    if sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+        return 0
+    else
+        return 1
+    fi
+}
 
-# Check if Docker Compose is available
-if ! docker compose version >/dev/null 2>&1; then
-    error "Docker Compose plugin is not available. Please check your Docker installation."
-fi
+# Ubuntu repository Docker installation
+install_docker_ubuntu() {
+    if sudo apt install -y docker.io docker-compose-plugin; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Snap Docker installation (last resort)
+install_docker_snap() {
+    if command -v snap >/dev/null 2>&1; then
+        if sudo snap install docker; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+check_and_install_docker
+
+# Check Docker Compose availability with fallback options
+check_docker_compose() {
+    log "Checking Docker Compose availability..."
+    
+    # Check for Docker Compose plugin (preferred)
+    if docker compose version >/dev/null 2>&1; then
+        log "Docker Compose plugin is available"
+        return 0
+    fi
+    
+    # Check for standalone docker-compose (fallback)
+    if command -v docker-compose >/dev/null 2>&1; then
+        log "Standalone docker-compose is available"
+        # Create alias for consistency
+        echo 'alias docker-compose="docker compose"' >> ~/.bashrc
+        return 0
+    fi
+    
+    # Try to install docker-compose as fallback
+    log "Docker Compose not found, attempting to install..."
+    
+    # Method 1: Try installing via apt
+    if sudo apt install -y docker-compose-plugin; then
+        log "Docker Compose plugin installed via apt"
+        return 0
+    fi
+    
+    # Method 2: Install standalone docker-compose
+    log "Installing standalone docker-compose..."
+    local compose_version=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d'"' -f4)
+    if [ -z "$compose_version" ]; then
+        compose_version="v2.21.0"  # Fallback version
+    fi
+    
+    if sudo curl -L "https://github.com/docker/compose/releases/download/$compose_version/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose; then
+        sudo chmod +x /usr/local/bin/docker-compose
+        if docker-compose --version >/dev/null 2>&1; then
+            log "Standalone docker-compose installed successfully"
+            return 0
+        fi
+    fi
+    
+    error "Failed to install Docker Compose. Please install it manually."
+}
+
+check_docker_compose
 
 # Create application directory
 APP_DIR="$HOME/n8n-npm-stack"
@@ -281,20 +472,51 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable n8n-npm-stack.service
 
-# Start the stack
-log "Starting the Docker stack..."
-docker compose up -d
+# Start the stack with better error handling
+start_docker_stack() {
+    log "Starting the Docker stack..."
+    
+    # Determine which docker compose command to use
+    local compose_cmd="docker compose"
+    if ! docker compose version >/dev/null 2>&1; then
+        if command -v docker-compose >/dev/null 2>&1; then
+            compose_cmd="docker-compose"
+        else
+            error "No Docker Compose found!"
+        fi
+    fi
+    
+    # Start the services
+    if $compose_cmd up -d; then
+        log "Docker stack started successfully!"
+    else
+        error "Failed to start Docker stack. Check the logs with: $compose_cmd logs"
+    fi
+    
+    # Wait for services to be ready
+    log "Waiting for services to start..."
+    local max_wait=60
+    local wait_time=0
+    
+    while [ $wait_time -lt $max_wait ]; do
+        if docker ps | grep -q nginx-proxy-manager && docker ps | grep -q n8n; then
+            log "Services are running!"
+            break
+        fi
+        sleep 5
+        wait_time=$((wait_time + 5))
+        log "Waiting... ($wait_time/$max_wait seconds)"
+    done
+    
+    if [ $wait_time -ge $max_wait ]; then
+        warning "Services may not have started properly within $max_wait seconds"
+        log "Current container status:"
+        docker ps -a
+        log "Check logs with: $compose_cmd logs"
+    fi
+}
 
-# Wait for services to be healthy
-log "Waiting for services to start..."
-sleep 30
-
-# Check if services are running
-if docker ps | grep -q nginx-proxy-manager && docker ps | grep -q n8n; then
-    log "Services started successfully!"
-else
-    warning "Some services may not have started properly. Check with 'docker compose ps'"
-fi
+start_docker_stack
 
 # Display final information
 echo ""
